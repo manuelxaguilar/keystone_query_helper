@@ -1,3 +1,5 @@
+// TODO: Change all of this into ES2015 syntax
+
 var keystone = require('keystone');
 // var mongooseCache = require('mongoose-cache-manager');
 //
@@ -9,8 +11,6 @@ var keystone = require('keystone');
 // 	prefix: 'cache'
 // });
 
-
-// Move to ES6 syntax
 function Queries(view, locals) {
 
 	if (arguments.length === 1) {
@@ -29,28 +29,42 @@ function Queries(view, locals) {
 	this._errHandlers = {
 		err: function(err, res) {
 			console.log('oops... something went wrong -------', err);
-			return res.status(500).render('errors/500');
+			res.status(500).render('errors/500');
 		},
 		noResults: function(res) {
 			console.log('oops... no content here -------');
-			return res.status(404).render('errors/404');
+			res.status(404).render('errors/404');
 		}
 	};
 
-	// TODO: Make translation automatic
-	this._translate = function(result) {
-		if (result.nameEn) {
-			result.name = result.nameEn;
-		}
+	// TODO: Improve this
+	this._translate = function(results, locale) {
+		var objCopy = JSON.parse(JSON.stringify(results));
 
-		if (result.subtitleEn) {
-			result.subtitulo = result.subtitleEn;
-		}
-
-		if (result.contentEn && result.contentEn.extended) {
-			Object.keys(result.contentEn).forEach(function(key) {
-				result.content[key] = result.contentEn[key];
+		var iterateAndTranslate = function iterateAndTranslate(item) {
+			Object.keys(item).forEach(function(prop) {
+				if (item[prop] &&
+					typeof item[prop] !== 'undefined' &&
+					item[prop] !== null &&
+					item[prop].hasOwnProperty(locale[0])) {
+					if (Object.keys(item[prop][locale[0]]).length !== 0 &&
+						JSON.stringify(item[prop][locale[0]]) !== JSON.stringify({})) {
+						item[prop] = item[prop][locale[0]];
+					} else {
+						item[prop] = item[prop][locale[1]];
+					}
+				}
 			});
+		}
+
+		if (Object.prototype.toString.call(objCopy) === '[object Object]') {
+			iterateAndTranslate(objCopy);
+			return objCopy;
+		} else if (Object.prototype.toString.call(objCopy) === '[object Array]') {
+			objCopy.forEach(function(result) {
+				iterateAndTranslate(result);
+			});
+			return objCopy;
 		}
 	};
 
@@ -63,10 +77,8 @@ function Queries(view, locals) {
 	 * This is in need of a refactor. As of now it is sorting the
 	 * results accourding to 'createdAt', but this
 	 * should soon be modified to sort only if needed and sort
-	 * by the requested parameter.
+	 * by the parameter necessary.
 	 *
-	 * This specially should be in ES6 for performance improvements
-	 * on using arguments.
 	 */
 	this._sortAndLimit = function(results, prop, limit) {
 
@@ -133,16 +145,28 @@ function Queries(view, locals) {
  *
  */
 Queries.prototype.findAll = function(qData, cb) {
-
-	var self = this;
+	var _this = this;
 
 	function _find(qData, fcb) {
 
 		var q = keystone.list(qData.model).model.find(qData.params)
-			.sort(qData.sort || '')
-			.populate(qData.populate || '')
-			.populate(qData.populate2 || '')
-			.limit(qData.limit || '');
+			.select(qData.select || '')
+			.limit(qData.limit || '')
+			.sort(qData.sort || '');
+
+		if (qData.lean) {
+			q.lean();
+		}
+
+		if (qData.populate) {
+			qData.populate.forEach(function(populate) {
+				if (populate.length > 1) {
+					q.populate(populate[0], populate[1]);
+				} else {
+					q.populate(populate[0]);
+				}
+			});
+		}
 
 		if (qData.where) {
 			qData.where.forEach(function(param) {
@@ -154,15 +178,22 @@ Queries.prototype.findAll = function(qData, cb) {
 		q.exec(function(err, results) {
 
 			var moveOn = function(err) {
-				if (qData.req && qData.req.getLocale() === 'en') {
-					self._translate(results);
+				if (qData.locale && qData.locale.length) {
+					results = Object.assign(results, _this._translate(results, qData.locale));
 				}
-
-				self._locals.data[qData.local] = results;
 
 				if (typeof qData.xhr === 'function') {
-					qData.xhr(self._locals);
+					if (qData.path) {
+						results.forEach(function(elem, i) {
+							elem._doc[qData.path] = elem[qData.path];
+						});
+					}
+					_this._locals.data[qData.local] = results;
+					qData.xhr(_this._locals);
+				} else {
+					_this._locals.data[qData.local] = results;
 				}
+
 				fcb(err);
 			};
 
@@ -185,7 +216,7 @@ Queries.prototype.findAll = function(qData, cb) {
 					if (err) console.log('err', err);
 
 					if (qData.limitPath) {
-						self._locals.data[qData.localRel] = self._sortAndLimit(results,
+						_this._locals.data[qData.localRel] = _this._sortAndLimit(results,
 							qData.populate, qData.limitPath, qData.path);
 					}
 
@@ -224,8 +255,7 @@ Queries.prototype.findAll = function(qData, cb) {
  *
  */
 Queries.prototype.findOne = function(qData, cb) {
-
-	var self = this;
+	var _this = this;
 
 	function _find(qData, fcb) {
 		var q = keystone.list(qData.model).model.findOne(qData.params)
@@ -245,24 +275,26 @@ Queries.prototype.findOne = function(qData, cb) {
 		if (qData.lean) q.lean();
 
 		q.exec(function(err, result) {
-
+			var copyResult;
 			/**
 			 * Check if there are any errors to return err partials
 			 */
-			if (err) {
-				self._errHandlers.err(err, qData.res);
+			if (qData.ignore && (err || !result)) {
+				fcb();
+				return;
+			} else if (err) {
+				_this._errHandlers.err(err, qData.res);
+				return;
 			} else if (!result) {
-				self._errHandlers.noResults(qData.res);
+				_this._errHandlers.noResults(qData.res);
+				return;
 			}
 
 			/**
-			 * Check if the site is in English.
-			 * If so, check if there are English versions and replace
-			 * the Spanish versions here on the backend
-			 *
+			 * Translate if indicated
 			 */
-			if (qData.req && qData.req.getLocale() === 'en') {
-				self._translate(result);
+			if (qData.locale && qData.locale.length) {
+				copyResult = _this._translate(result, qData.locale);
 			}
 
 			/**
@@ -270,15 +302,14 @@ Queries.prototype.findOne = function(qData, cb) {
 			 * second query
 			 */
 			if (result && qData.recursiveParams) {
-
 				var params = qData.recursiveParams.params;
 
 				/**
 				 * Set the result of the first query to the specified
 				 * local before the second one is triggered
 				 */
-				self._locals.data[qData.local] = result;
-				// console.log(qData.local, self._locals.data[qData.local]);
+				_this._locals.data[qData.local] = result;
+				// console.log(qData.local, _this._locals.data[qData.local]);
 
 
 				/**
@@ -323,7 +354,7 @@ Queries.prototype.findOne = function(qData, cb) {
 										 * should soon be modified to sort only if needed and sort
 										 * by the parameter necessary.
 										 */
-										self._locals.data[qData.localRelDeep] = self._sortAndLimit(
+										_this._locals.data[qData.localRelDeep] = _this._sortAndLimit(
 											result[qData.path], [qData.pathDeep], qData.limit);
 
 										fcb(err);
@@ -335,9 +366,7 @@ Queries.prototype.findOne = function(qData, cb) {
 								});
 
 						} else {
-							self._locals.data[qData.localRel] = result[qData.path];
-							// console.log(qData.localRel, self._locals.data[qData.localRel]);
-
+							_this._locals.data[qData.localRel] = result[qData.path];
 							fcb(err);
 						}
 					});
@@ -346,12 +375,10 @@ Queries.prototype.findOne = function(qData, cb) {
 					fcb(err);
 				}
 
-				self._locals.data[qData.local] = result;
-				// console.log(self._locals.data[qData.local]);
+				_this._locals.data[qData.local] = copyResult;
 
 				if (typeof qData.xhr === 'function') {
-					// console.log('self._locals ---------', self._locals);
-					qData.xhr(self._locals);
+					qData.xhr(_this._locals);
 				}
 
 			}
@@ -368,6 +395,28 @@ Queries.prototype.findOne = function(qData, cb) {
 	}
 
 };
+
+
+Queries.prototype.count = function(qData, cb) {
+
+	var _this = this;
+
+	function _find(qData, fcb) {
+		keystone.list(qData.model).model.count(qData.params, function(err, count) {
+			_this._locals.data[qData.local] = count;
+			fcb(err);
+		});
+	}
+
+	if (cb) {
+		_find(qData, cb);
+	} else {
+		this._view.on('init', function(next) {
+			_find(qData, next);
+		});
+	}
+
+}
 
 
 module.exports = exports = Queries;
