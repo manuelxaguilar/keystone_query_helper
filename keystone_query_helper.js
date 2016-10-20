@@ -45,7 +45,8 @@ function Queries(view, locals) {
 			Object.keys(item).forEach(function(prop) {
 				if (item[prop] &&
 					typeof item[prop] !== 'undefined' &&
-					item[prop] !== null &&
+					item[prop] != null &&
+					item[prop] !== 'null' &&
 					item[prop].hasOwnProperty(locale[0])) {
 					if (Object.keys(item[prop][locale[0]]).length !== 0 &&
 						JSON.stringify(item[prop][locale[0]]) !== JSON.stringify({})) {
@@ -81,18 +82,15 @@ function Queries(view, locals) {
 	 *
 	 */
 	this._sortAndLimit = function(results, prop, limit) {
-
 		var limitArr = [];
 		var newArr = [];
 		var limitArrInner;
-
 
 		function sortMe(a, b) {
 			return Date.parse(b.createdAt) - Date.parse(a.createdAt);
 		}
 
 		if (arguments[3]) {
-
 			var arg = arguments[3];
 
 			results.forEach(function(item) {
@@ -105,7 +103,6 @@ function Queries(view, locals) {
 
 					limitArr.push(limitArrInner);
 				}
-
 			});
 
 			limitArr.forEach(function(elem) {
@@ -113,9 +110,7 @@ function Queries(view, locals) {
 			});
 
 			return newArr;
-
 		} else {
-
 			results.forEach(function(item) {
 				limitArrInner = [];
 				item[prop].forEach(function(propVal) {
@@ -132,8 +127,6 @@ function Queries(view, locals) {
 		}
 
 	};
-
-
 }
 
 
@@ -148,7 +141,6 @@ Queries.prototype.findAll = function(qData, cb) {
 	var _this = this;
 
 	function _find(qData, fcb) {
-
 		var q = keystone.list(qData.model).model.find(qData.params)
 			.select(qData.select || '')
 			.limit(qData.limit || '')
@@ -176,32 +168,48 @@ Queries.prototype.findAll = function(qData, cb) {
 		if (qData.lean) q.lean();
 
 		q.exec(function(err, results) {
-
+			// This will be the result of the translation
+			// It will have removed all of Mongoose's methods
+			var resultsCopy;
 			var moveOn = function(err) {
+				// Here we either set the copy or reassign results to it
+				// in order to use it below.
 				if (qData.locale && qData.locale.length) {
-					results = Object.assign(results, _this._translate(results, qData.locale));
+					resultsCopy = _this._translate(results, qData.locale);
+				} else {
+					resultsCopy = results;
 				}
 
+				// Check if this has to be passed to the client controller
+				// and if it has populated results.
+				// If so, then check if it was translated or not
+				// and assign the multimedia prop with its info to each
+				// result.
 				if (typeof qData.xhr === 'function') {
 					if (qData.path) {
-						results.forEach(function(elem, i) {
-							elem._doc[qData.path] = elem[qData.path];
-						});
+						if (qData.locale && qData.locale.length) {
+							results.forEach(function(elem, i) {
+								resultsCopy[i][qData.path] = elem[qData.path];
+							});
+						} else {
+							results.forEach(function(elem) {
+								elem._doc[qData.path] = elem[qData.path];
+							});
+							resultsCopy = results;
+						}
 					}
-					_this._locals.data[qData.local] = results;
+					_this._locals.data[qData.local] = resultsCopy;
 					qData.xhr(_this._locals);
 				} else {
-					_this._locals.data[qData.local] = results;
+					_this._locals.data[qData.local] = resultsCopy;
 				}
-
 				fcb(err);
 			};
 
 			if (results && qData.path) {
-
 				var arr = [];
-				if (qData.populate && !qData.populateResults) {
 
+				if (qData.populate && !qData.populateResults) {
 					results.forEach(function(elem) {
 						if (elem[qData.populate]) {
 							arr.push(elem[qData.populate]);
@@ -212,21 +220,17 @@ Queries.prototype.findAll = function(qData, cb) {
 				}
 
 				keystone.populateRelated(arr, qData.path, function(err) {
-
 					if (err) console.log('err', err);
-
 					if (qData.limitPath) {
 						_this._locals.data[qData.localRel] = _this._sortAndLimit(results,
 							qData.populate, qData.limitPath, qData.path);
 					}
-
 					moveOn(err);
 				});
 			} else {
 				moveOn(err);
 			}
 		});
-
 	}
 
 	if (cb) {
