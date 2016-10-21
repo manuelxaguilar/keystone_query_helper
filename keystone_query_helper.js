@@ -1,4 +1,8 @@
+// REFACTOR!!!
 // TODO: Change all of this into ES2015 syntax
+// TODO: Modify all of this to return promises
+// TODO: Do not hand over information this does not actually need to know about
+// TODO: Add cache
 
 var keystone = require('keystone');
 // var mongooseCache = require('mongoose-cache-manager');
@@ -189,7 +193,7 @@ Queries.prototype.findAll = function(qData, cb) {
 					if (qData.path) {
 						if (qData.locale && qData.locale.length) {
 							results.forEach(function(elem, i) {
-								resultsCopy[i][qData.path] = elem[qData.path];
+								resultsCopy[i][qData.path] = _this._translate(elem[qData.path], qData.locale);
 							});
 						} else {
 							results.forEach(function(elem) {
