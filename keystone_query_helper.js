@@ -193,7 +193,7 @@ Queries.prototype.findAll = function(qData, cb) {
 					if (qData.path) {
 						if (qData.locale && qData.locale.length) {
 							results.forEach(function(elem, i) {
-								resultsCopy[i][qData.path] = _this._translate(elem[qData.path], qData.locale);
+								resultsCopy[i][qData.path] = (qData.locale[2] ? _this._translate(elem[qData.path], qData.locale) : elem[qData.path]);
 							});
 						} else {
 							results.forEach(function(elem) {
